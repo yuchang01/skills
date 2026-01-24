@@ -1,14 +1,31 @@
 {
-  "name": "anthropic-agent-skills",
+  "name": "agent-skills",
   "owner": {
-    "name": "Keith Lazuka",
-    "email": "klazuka@anthropic.com"
+    "name": "myskills"
   },
   "metadata": {
-    "description": "Anthropic example skills",
+    "description": "original skills for prompt engineering and AI interaction optimization and some example skills",
     "version": "1.0.0"
   },
   "plugins": [
+    {
+      "name": "prompt-engineering-skills",
+      "description": "Collection of prompt engineering tools featuring 57 proven frameworks for crafting optimized AI prompts across various domains including marketing, decision analysis, education, product development, creative writing, and complex reasoning",
+      "source": "./",
+      "strict": false,
+      "skills": [
+        "./skills/prompt-optimizer"
+      ]
+    },
+    {
+      "name": "sync-skills",
+      "description": "Automatically sync skills from multiple sources (Local, GitHub, skillsmp.com) to all installed AI coding tool directories. Supports Claude Code, GitHub Copilot, Cursor, Windsurf, and more.",
+      "source": "./",
+      "strict": false,
+      "skills": [
+        "./skills/sync-skills"
+      ]
+    },
     {
       "name": "document-skills",
       "description": "Collection of document processing suite including Excel, Word, PowerPoint, and PDF capabilities",
