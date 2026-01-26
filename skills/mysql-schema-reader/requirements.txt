@@ -1,0 +1,9 @@
+# MySQL Schema Reader Dependencies
+# Install with: pip install -r requirements.txt
+
+# MySQL connector (choose one)
+mysql-connector-python>=8.0.0
+# Alternative: pymysql>=1.0.0
+
+# YAML parser for config file scanning
+pyyaml>=6.0.0
