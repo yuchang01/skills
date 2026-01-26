@@ -337,14 +337,15 @@ def parse_yaml_config(config_file: str) -> Optional[Dict[str, Any]]:
     return None
 
 
-def select_config_file(config_files: List[str]) -> Optional[str]:
-    """让用户选择一个配置文件
+def select_config_file(config_files: List[str], target_database: Optional[str] = None) -> Optional[str]:
+    """尝试自动选择配置文件，如果不唯一则列出选项
     
     Args:
         config_files: 配置文件路径列表
+        target_database: 目标数据库名称，用于智能匹配
     
     Returns:
-        选中的配置文件路径
+        选中的配置文件路径，若不唯一则返回 None
     """
     if not config_files:
         return None
@@ -353,24 +354,33 @@ def select_config_file(config_files: List[str]) -> Optional[str]:
         print(f"✅ 找到配置文件: {config_files[0]}", file=sys.stderr)
         return config_files[0]
     
-    # 多个配置文件，让用户选择
-    print(f"\n📁 找到 {len(config_files)} 个配置文件：", file=sys.stderr)
-    for i, file in enumerate(config_files, 1):
-        print(f"  [{i}] {file}", file=sys.stderr)
+    # 如果指定了目标数据库，尝试智能匹配
+    if target_database:
+        print(f"🔍 尝试匹配数据库: {target_database}", file=sys.stderr)
+        matched_configs = []
+        
+        for config_file in config_files:
+            conn_params = parse_yaml_config(config_file)
+            if conn_params and conn_params.get('database') == target_database:
+                matched_configs.append(config_file)
+        
+        if len(matched_configs) == 1:
+            print(f"✅ 自动匹配到配置文件: {matched_configs[0]}", file=sys.stderr)
+            return matched_configs[0]
+        elif len(matched_configs) > 1:
+            print(f"⚠️  找到 {len(matched_configs)} 个匹配的配置文件", file=sys.stderr)
+            config_files = matched_configs
+        elif len(matched_configs) == 0:
+            print(f"⚠️  未找到数据库 '{target_database}' 的配置文件", file=sys.stderr)
     
-    while True:
-        try:
-            choice = input("\n请选择配置文件 (输入序号): ").strip()
-            index = int(choice) - 1
-            if 0 <= index < len(config_files):
-                selected = config_files[index]
-                print(f"✅ 已选择: {selected}", file=sys.stderr)
-                return selected
-            else:
-                print(f"❌ 无效选择，请输入 1-{len(config_files)} 之间的数字", file=sys.stderr)
-        except (ValueError, KeyboardInterrupt):
-            print("\n❌ 操作已取消", file=sys.stderr)
-            return None
+    # 不唯一且无法自动匹配，列出选项供 AI 决策
+    print(f"\n📁 找到多个配置文件，请指定 --config <路径> 或 --database <名称>：", file=sys.stderr)
+    for i, file in enumerate(config_files, 1):
+        conn_params = parse_yaml_config(file)
+        db_name = conn_params.get('database', '未知') if conn_params else '未知'
+        print(f"  - {file} (database: {db_name})", file=sys.stderr)
+    
+    return None
 
 
 def get_cache_path(conn_params: Dict[str, Any], tables: Optional[List[str]] = None) -> str:
@@ -474,11 +484,12 @@ def main():
     conn_group.add_argument('--url', help='数据库连接字符串 (mysql://user:password@host:port/database)')
     conn_group.add_argument('--host', help='数据库主机地址')
     conn_group.add_argument('--scan-config', metavar='PATH', help='扫描项目中的 application-local 配置文件')
+    conn_group.add_argument('--config', metavar='FILE', help='直接指定配置文件路径')
     
     parser.add_argument('--port', type=int, default=3306, help='数据库端口 (默认: 3306)')
     parser.add_argument('--user', help='数据库用户名')
     parser.add_argument('--password', help='数据库密码')
-    parser.add_argument('--database', help='数据库名称')
+    parser.add_argument('--database', help='数据库名称（用于智能匹配配置文件或覆盖配置）')
     
     # 提取选项
     parser.add_argument('--tables', nargs='+', help='指定要提取的表名 (默认: 所有表)')
@@ -497,7 +508,17 @@ def main():
     # 解析连接参数
     conn_params = None
     
-    if args.scan_config:
+    if args.config:
+        # 直接指定配置文件模式
+        conn_params = parse_yaml_config(args.config)
+        if not conn_params:
+            print(f"❌ 无法从配置文件解析数据库连接信息: {args.config}", file=sys.stderr)
+            sys.exit(1)
+        # 如果命令行指定了 --database，覆盖配置文件中的数据库名
+        if args.database:
+            conn_params['database'] = args.database
+
+    elif args.scan_config:
         # 扫描配置文件模式
         print(f"🔍 扫描配置文件: {args.scan_config}", file=sys.stderr)
         config_files = scan_config_files(args.scan_config)
@@ -506,14 +527,19 @@ def main():
             print("❌ 未找到 application-local.yaml/yml 配置文件", file=sys.stderr)
             sys.exit(1)
         
-        selected_config = select_config_file(config_files)
+        selected_config = select_config_file(config_files, args.database)
         if not selected_config:
+            # 如果不唯一，打印信息后退出，由 AI 处理
             sys.exit(1)
         
         conn_params = parse_yaml_config(selected_config)
         if not conn_params:
             print("❌ 无法从配置文件解析数据库连接信息", file=sys.stderr)
             sys.exit(1)
+        
+        # 如果命令行指定了 --database，覆盖配置文件中的数据库名
+        if args.database:
+            conn_params['database'] = args.database
     
     elif args.url:
         conn_params = parse_connection_string(args.url)
