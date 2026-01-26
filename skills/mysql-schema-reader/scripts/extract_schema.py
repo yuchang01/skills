@@ -244,15 +244,20 @@ def parse_connection_string(conn_str: str) -> Dict[str, Any]:
 def scan_config_files(search_path: str = ".") -> List[str]:
     """扫描项目中的 application-local 配置文件
     
+    查找 src/main/resources 和 src/test/resources 目录下的配置文件
+    
     Args:
         search_path: 搜索路径，默认为当前目录
     
     Returns:
         找到的配置文件路径列表
     """
+    # 搜索 src/main/resources 和 src/test/resources 下的配置文件
     patterns = [
-        "**/application-local.yaml",
-        "**/application-local.yml"
+        "**/src/main/resources/application-local.yaml",
+        "**/src/main/resources/application-local.yml",
+        "**/src/test/resources/application-local.yaml",
+        "**/src/test/resources/application-local.yml"
     ]
     
     config_files = []

@@ -38,7 +38,7 @@ Use `scripts/extract_schema.py` to extract table metadata.
 python scripts/extract_schema.py --scan-config /path/to/project
 ```
 This will:
-- Scan the project for `application-local.yaml/yml` files
+- Scan `src/main/resources/application-local.yaml/yml` and `src/test/resources/application-local.yaml/yml`
 - Display all found configuration files
 - Prompt you to select one if multiple files are found
 - Automatically extract database connection info from the selected file
