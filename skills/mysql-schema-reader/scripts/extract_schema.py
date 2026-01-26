@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 MySQL Schema Extractor
-提取 MySQL 数据库表结构信息，输出为结构化格式供 AI 代码生成使用
+提取 MySQL 数据库表结构信息，输出为结构化格式供分析和文档使用
 """
 
 import argparse
@@ -10,6 +10,8 @@ import sys
 import os
 import glob
 import hashlib
+import tempfile
+from datetime import datetime
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 from urllib.parse import urlparse
@@ -244,15 +246,20 @@ def parse_connection_string(conn_str: str) -> Dict[str, Any]:
 def scan_config_files(search_path: str = ".") -> List[str]:
     """扫描项目中的 application-local 配置文件
     
+    查找 src/main/resources 和 src/test/resources 目录下的配置文件
+    
     Args:
         search_path: 搜索路径，默认为当前目录
     
     Returns:
         找到的配置文件路径列表
     """
+    # 搜索 src/main/resources 和 src/test/resources 下的配置文件
     patterns = [
-        "**/application-local.yaml",
-        "**/application-local.yml"
+        "**/src/main/resources/application-local.yaml",
+        "**/src/main/resources/application-local.yml",
+        "**/src/test/resources/application-local.yaml",
+        "**/src/test/resources/application-local.yml"
     ]
     
     config_files = []
@@ -388,9 +395,9 @@ def get_cache_path(conn_params: Dict[str, Any], tables: Optional[List[str]] = No
     cache_key = '_'.join(cache_key_parts)
     cache_hash = hashlib.md5(cache_key.encode()).hexdigest()[:8]
     
-    # 缓存目录
-    cache_dir = Path.home() / '.mysql_schema_cache'
-    cache_dir.mkdir(exist_ok=True)
+    # 使用系统临时目录 + mysql_schema_reader/cache/
+    cache_dir = Path(tempfile.gettempdir()) / 'mysql_schema_reader' / 'cache'
+    cache_dir.mkdir(parents=True, exist_ok=True)
     
     filename = f"{conn_params['database']}_{cache_hash}.json"
     return str(cache_dir / filename)
@@ -572,11 +579,26 @@ def main():
         
         # 输出结果
         if args.output:
-            with open(args.output, 'w', encoding='utf-8') as f:
-                f.write(output)
-            print(f"✅ 表结构已保存到: {args.output}", file=sys.stderr)
+            output_path = args.output
         else:
-            print(output)
+            # 默认输出到系统临时目录
+            output_dir = Path(tempfile.gettempdir()) / 'mysql_schema_reader' / 'outputs'
+            output_dir.mkdir(parents=True, exist_ok=True)
+            
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            ext = 'json' if args.format == 'json' else 'md'
+            filename = f"{conn_params['database']}_{timestamp}.{ext}"
+            output_path = str(output_dir / filename)
+        
+        with open(output_path, 'w', encoding='utf-8') as f:
+            f.write(output)
+        
+        print(f"\n✅ 表结构已保存到:", file=sys.stderr)
+        print(f"   {output_path}", file=sys.stderr)
+        print(f"", file=sys.stderr)
+        print(f"💡 提示:", file=sys.stderr)
+        print(f"   - 文件位于系统临时目录，会被自动清理", file=sys.stderr)
+        print(f"   - 如需长期保存，请使用: --output <目标路径>", file=sys.stderr)
     
     except Exception as e:
         print(f"❌ 处理失败: {e}", file=sys.stderr)

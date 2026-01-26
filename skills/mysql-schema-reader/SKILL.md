@@ -14,8 +14,7 @@ Extract MySQL database table structures and convert them into structured formats
 Copy this checklist to track progress:
 - [ ] Step 1: Connect to MySQL Database
 - [ ] Step 2: Extract Table Schema
-- [ ] Step 3: (Optional) Format for Code Generation
-- [ ] Step 4: Review and Use Output
+- [ ] Step 3: Review and Use Output
 
 ### Step 1: Connect to MySQL Database
 
@@ -38,7 +37,7 @@ Use `scripts/extract_schema.py` to extract table metadata.
 python scripts/extract_schema.py --scan-config /path/to/project
 ```
 This will:
-- Scan the project for `application-local.yaml/yml` files
+- Scan `src/main/resources/application-local.yaml/yml` and `src/test/resources/application-local.yaml/yml`
 - Display all found configuration files
 - Prompt you to select one if multiple files are found
 - Automatically extract database connection info from the selected file
@@ -97,8 +96,9 @@ python scripts/extract_schema.py \
 **Note**: 
 - Schema extraction results are cached by default to improve performance
 - When database schema changes, use `--force-refresh` to get the latest structure
-- Cache files are stored in `~/.mysql_schema_cache/`
-- Use `--no-cache` to completely disable caching
+- Cache and output files are stored in system temp directory (`%TEMP%/mysql_schema_reader/`)
+- Temporary files will be automatically cleaned by the system
+- Use `--output` to specify a permanent storage location
 
 The output includes:
 - Table names and comments
@@ -106,70 +106,22 @@ The output includes:
 - Index information (name, type, uniqueness, columns)
 - Foreign key relationships
 
-### Step 3: (Optional) Format for Code Generation
+### Step 3: Review and Use Output
 
-Use `scripts/format_schema.py` to convert raw schema into code-generation-friendly format with:
-- MySQL to Java type mappings
-- Suggested ORM annotations (JPA or MyBatis-Plus)
-- Validation annotation suggestions
-- Camel case field name conversions
-- Required import statements
+Present the extracted schema to the user.
 
-**Format for JPA/Hibernate**
-```bash
-python scripts/format_schema.py schema.json --orm jpa --pretty
-```
+**The skill only extracts database schema metadata for analysis and documentation.**
 
-**Format for MyBatis/MyBatis-Plus**
-```bash
-python scripts/format_schema.py schema.json --orm mybatis --pretty
-```
+Output location:
+- **Default**: System temp directory (`%TEMP%/mysql_schema_reader/outputs/`)
+- **Custom**: Use `--output` to specify a permanent location
+- Files are named with timestamp: `database_YYYYMMDD_HHMMSS.json/md`
 
-**Pipeline: Extract and format in one command**
-```bash
-python scripts/extract_schema.py --url "mysql://user:pass@host/db" | \
-python scripts/format_schema.py --orm jpa --output formatted.json --pretty
-```
-
-The formatted output includes:
-- Java class name suggestions (PascalCase)
-- Java field names (camelCase)
-- Java type mappings
-- JPA/MyBatis annotations
-- Validation annotations (@NotNull, @Size, @Email, etc.)
-- Required import statements
-
-### Step 4: Review and Use Output
-
-Present the extracted or formatted schema to the user.
-
-**The skill only extracts and formats database schema metadata.**
-
-Output can be:
-1. Directly shown in the conversation for review
-2. Saved to a file for documentation
-3. Used for database analysis and design review
-
-The formatted schema includes:
-- Table and column metadata
-- Type mappings (MySQL → Java)
-- Suggested annotations (JPA/MyBatis-Plus)
-- Validation annotations
-- Import statements
-
-## Type Mapping Reference
-
-For detailed MySQL to Java type mappings, ORM annotations, and best practices, see [references/type_mapping.md](references/type_mapping.md).
-
-For complete MyBatis-Plus configuration guide (Spring Boot 3.x + MySQL 8.x), see [references/mybatis-plus-config.md](references/mybatis-plus-config.md).
-
-Key mappings:
-- `INT` → `Integer`, `BIGINT` → `Long`
-- `VARCHAR/TEXT` → `String`
-- `DECIMAL` → `BigDecimal` (for monetary values)
-- `DATETIME/TIMESTAMP` → `LocalDateTime`
-- `DATE` → `LocalDate`
-- `TINYINT(1)` → `Boolean`
+Output can be used for:
+1. Database design review and analysis
+2. Technical documentation generation
+3. Schema comparison and migration planning
+4. Understanding existing database structure
 
 ## Error Handling
 
@@ -221,23 +173,17 @@ The tool will list all found `application-local.yaml/yml` files and prompt for s
 
 **Assistant**:
 ```bash
-# Extract schema
+# Extract schema in JSON format
 python scripts/extract_schema.py \
   --host localhost \
   --user root \
   --password secret123 \
   --database myapp \
-  --output raw_schema.json \
-  --pretty
-
-# Format for MyBatis-Plus
-python scripts/format_schema.py raw_schema.json \
-  --orm mybatis \
-  --output mybatis_schema.json \
+  --output schema.json \
   --pretty
 ```
 
-Present the formatted schema to user for review and analysis.
+Present the extracted schema to user for review and analysis.
 
 ### Example 3: Extract specific tables only
 
@@ -293,8 +239,6 @@ This will ignore cached data and re-extract the current table structure from the
 
 1. **Security**: Never commit database credentials to version control
 2. **Performance**: Extract only needed tables for large databases
-3. **Validation**: Review extracted schema before code generation
-4. **Documentation**: Save schema output as documentation for reference
-5. **Type Mapping**: Consult [references/type_mapping.md](references/type_mapping.md) for accurate type conversions
-6. **Cache Management**: Use `--force-refresh` after modifying database schema to ensure latest structure
-7. **Config Files**: Use `--scan-config` to automatically detect and select configuration files in Spring Boot projects
+3. **Documentation**: Save schema output as documentation for reference
+4. **Cache Management**: Use `--force-refresh` after modifying database schema to ensure latest structure
+5. **Config Files**: Use `--scan-config` to automatically detect and select configuration files in Spring Boot projects
