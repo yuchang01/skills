@@ -38,41 +38,105 @@ except ImportError:
 class MySQLSchemaExtractor:
     """MySQL 表结构提取器"""
     
-    def __init__(self, host: str, port: int, user: str, password: str, database: str):
+    def __init__(self, host: str, port: int, user: str, password: str, database: str, max_retries: int = 3, timeout: int = 10):
         self.host = host
         self.port = port
         self.user = user
         self.password = password
         self.database = database
         self.connection = None
+        self.max_retries = max_retries
+        self.timeout = timeout
         
     def connect(self):
-        """建立数据库连接"""
-        try:
-            if HAS_MYSQL_CONNECTOR:
-                self.connection = mysql.connector.connect(
-                    host=self.host,
-                    port=self.port,
-                    user=self.user,
-                    password=self.password,
-                    database=self.database
-                )
-            elif HAS_MYSQLDB:
-                self.connection = MySQLdb.connect(
-                    host=self.host,
-                    port=self.port,
-                    user=self.user,
-                    passwd=self.password,
-                    db=self.database
-                )
-            else:
-                raise ImportError("需要安装 mysql-connector-python 或 pymysql")
-            
-            print(f"✅ 成功连接到数据库: {self.database}", file=sys.stderr)
-            
-        except Exception as e:
-            print(f"❌ 数据库连接失败: {e}", file=sys.stderr)
-            sys.exit(1)
+        """建立数据库连接（带重试机制）"""
+        last_error = None
+        
+        for attempt in range(1, self.max_retries + 1):
+            try:
+                if HAS_MYSQL_CONNECTOR:
+                    self.connection = mysql.connector.connect(
+                        host=self.host,
+                        port=self.port,
+                        user=self.user,
+                        password=self.password,
+                        database=self.database,
+                        connection_timeout=self.timeout
+                    )
+                elif HAS_MYSQLDB:
+                    self.connection = MySQLdb.connect(
+                        host=self.host,
+                        port=self.port,
+                        user=self.user,
+                        passwd=self.password,
+                        db=self.database,
+                        connect_timeout=self.timeout
+                    )
+                else:
+                    raise ImportError("需要安装 mysql-connector-python 或 pymysql")
+                
+                print(f"✅ 成功连接到数据库: {self.database}", file=sys.stderr)
+                return
+                
+            except ImportError as e:
+                # 依赖问题不重试
+                print(f"❌ 缺少必要的 Python 包: {e}", file=sys.stderr)
+                print(f"💡 请安装: pip install mysql-connector-python pyyaml", file=sys.stderr)
+                sys.exit(1)
+                
+            except Exception as e:
+                last_error = e
+                if attempt < self.max_retries:
+                    print(f"⚠️  连接失败 (尝试 {attempt}/{self.max_retries}): {e}", file=sys.stderr)
+                    print(f"🔄 {2 ** (attempt - 1)} 秒后重试...", file=sys.stderr)
+                    import time
+                    time.sleep(2 ** (attempt - 1))  # 指数退避: 1s, 2s, 4s
+                else:
+                    print(f"❌ 数据库连接失败 (已重试 {self.max_retries} 次)", file=sys.stderr)
+                    self._print_connection_diagnostics(e)
+        
+        sys.exit(1)
+    
+    def _print_connection_diagnostics(self, error: Exception):
+        """打印连接失败的诊断信息"""
+        error_msg = str(error).lower()
+        
+        print(f"\n🔍 错误详情: {error}", file=sys.stderr)
+        print(f"\n💡 可能的原因和解决方案:", file=sys.stderr)
+        
+        if 'access denied' in error_msg or '1045' in error_msg:
+            print(f"   ❌ 用户名或密码错误", file=sys.stderr)
+            print(f"      - 检查用户名: {self.user}", file=sys.stderr)
+            print(f"      - 验证密码是否正确", file=sys.stderr)
+            print(f"      - 确认数据库用户权限: GRANT ALL ON {self.database}.* TO '{self.user}'@'%'", file=sys.stderr)
+        
+        elif 'unknown database' in error_msg or '1049' in error_msg:
+            print(f"   ❌ 数据库不存在: {self.database}", file=sys.stderr)
+            print(f"      - 检查数据库名称拼写", file=sys.stderr)
+            print(f"      - 查看可用数据库: SHOW DATABASES", file=sys.stderr)
+        
+        elif 'can\'t connect' in error_msg or 'connection refused' in error_msg or '2003' in error_msg:
+            print(f"   ❌ 无法连接到数据库服务器", file=sys.stderr)
+            print(f"      - 检查主机地址: {self.host}:{self.port}", file=sys.stderr)
+            print(f"      - 确认 MySQL 服务正在运行", file=sys.stderr)
+            print(f"      - 检查防火墙设置", file=sys.stderr)
+            print(f"      - 验证网络连接: ping {self.host}", file=sys.stderr)
+        
+        elif 'timeout' in error_msg or 'timed out' in error_msg:
+            print(f"   ❌ 连接超时", file=sys.stderr)
+            print(f"      - 网络延迟过高或服务器响应慢", file=sys.stderr)
+            print(f"      - 尝试增加超时时间（当前: {self.timeout}秒）", file=sys.stderr)
+            print(f"      - 检查网络连接稳定性", file=sys.stderr)
+        
+        elif 'host' in error_msg and 'not allowed' in error_msg:
+            print(f"   ❌ 主机不允许连接", file=sys.stderr)
+            print(f"      - MySQL 用户权限限制了连接来源", file=sys.stderr)
+            print(f"      - 需要授权: GRANT ALL ON *.* TO '{self.user}'@'你的IP' IDENTIFIED BY 'password'", file=sys.stderr)
+        
+        else:
+            print(f"   ❌ 未知错误", file=sys.stderr)
+            print(f"      - 检查 MySQL 服务日志", file=sys.stderr)
+            print(f"      - 验证数据库配置", file=sys.stderr)
     
     def close(self):
         """关闭数据库连接"""
@@ -199,13 +263,27 @@ class MySQLSchemaExtractor:
             "foreignKeys": foreign_keys
         }
     
+    def get_server_version(self) -> str:
+        """获取数据库服务器版本"""
+        try:
+            cursor = self.connection.cursor()
+            cursor.execute("SELECT VERSION()")
+            version = cursor.fetchone()[0]
+            return version
+        except Exception:
+            return "unknown"
+    
     def extract_schemas(self, table_names: Optional[List[str]] = None) -> Dict[str, Any]:
         """提取数据库表结构"""
         tables = self.get_tables(table_names)
         
         if not tables:
             print("⚠️  未找到任何表", file=sys.stderr)
-            return {"database": self.database, "tables": []}
+            return {
+                "database": self.database,
+                "tables": [],
+                "metadata": self._get_metadata()
+            }
         
         print(f"📊 正在提取 {len(tables)} 个表的结构...", file=sys.stderr)
         
@@ -218,7 +296,18 @@ class MySQLSchemaExtractor:
         return {
             "database": self.database,
             "tableCount": len(schemas),
-            "tables": schemas
+            "tables": schemas,
+            "metadata": self._get_metadata()
+        }
+    
+    def _get_metadata(self) -> Dict[str, Any]:
+        """生成元数据信息"""
+        return {
+            "extractedAt": datetime.now().isoformat(),
+            "serverVersion": self.get_server_version(),
+            "host": self.host,
+            "port": self.port,
+            "extractorVersion": "2.0.0"
         }
 
 
@@ -405,22 +494,23 @@ def get_cache_path(conn_params: Dict[str, Any], tables: Optional[List[str]] = No
     cache_key = '_'.join(cache_key_parts)
     cache_hash = hashlib.md5(cache_key.encode()).hexdigest()[:8]
     
-    # 使用系统临时目录 + mysql_schema_reader/cache/
-    cache_dir = Path(tempfile.gettempdir()) / 'mysql_schema_reader' / 'cache'
+    # 使用项目根目录下的 .aiout/mysql-schema-reader/cache/
+    cache_dir = Path.cwd() / '.aiout' / 'mysql-schema-reader' / 'cache'
     cache_dir.mkdir(parents=True, exist_ok=True)
     
     filename = f"{conn_params['database']}_{cache_hash}.json"
     return str(cache_dir / filename)
 
 
-def load_cache(cache_path: str) -> Optional[Dict[str, Any]]:
+def load_cache(cache_path: str, max_age_hours: int = 24) -> Optional[Dict[str, Any]]:
     """从缓存加载表结构
     
     Args:
         cache_path: 缓存文件路径
+        max_age_hours: 缓存最大有效期（小时），0表示不限制
     
     Returns:
-        缓存的表结构数据，不存在返回 None
+        缓存的表结构数据，不存在或过期返回 None
     """
     if not os.path.exists(cache_path):
         return None
@@ -428,7 +518,26 @@ def load_cache(cache_path: str) -> Optional[Dict[str, Any]]:
     try:
         with open(cache_path, 'r', encoding='utf-8') as f:
             data = json.load(f)
+        
+        # 检查缓存是否包含元数据
+        if 'metadata' not in data:
+            print(f"⚠️  缓存格式过旧，需要重新提取", file=sys.stderr)
+            return None
+        
+        # 检查缓存时效性
+        if max_age_hours > 0:
+            extracted_at = datetime.fromisoformat(data['metadata']['extractedAt'])
+            age_hours = (datetime.now() - extracted_at).total_seconds() / 3600
+            
+            if age_hours > max_age_hours:
+                print(f"⚠️  缓存已过期 ({age_hours:.1f} 小时)，需要重新提取", file=sys.stderr)
+                return None
+        
+        extracted_time = data['metadata']['extractedAt']
+        server_version = data['metadata'].get('serverVersion', 'unknown')
         print(f"✅ 从缓存加载: {cache_path}", file=sys.stderr)
+        print(f"   提取时间: {extracted_time}", file=sys.stderr)
+        print(f"   数据库版本: {server_version}", file=sys.stderr)
         return data
     except Exception as e:
         print(f"⚠️  缓存加载失败: {e}", file=sys.stderr)
@@ -445,7 +554,10 @@ def save_cache(cache_path: str, data: Dict[str, Any]):
     try:
         with open(cache_path, 'w', encoding='utf-8') as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
+        
+        extracted_time = data.get('metadata', {}).get('extractedAt', 'unknown')
         print(f"✅ 已缓存到: {cache_path}", file=sys.stderr)
+        print(f"   缓存时间: {extracted_time}", file=sys.stderr)
     except Exception as e:
         print(f"⚠️  缓存保存失败: {e}", file=sys.stderr)
 
@@ -502,6 +614,11 @@ def main():
     parser.add_argument('--cache', action='store_true', help='启用缓存（默认启用）')
     parser.add_argument('--no-cache', action='store_true', help='禁用缓存')
     parser.add_argument('--force-refresh', action='store_true', help='强制刷新，忽略缓存重新提取')
+    parser.add_argument('--cache-max-age', type=int, default=24, help='缓存最大有效期（小时），默认24小时，0表示不限制')
+    
+    # 连接选项
+    parser.add_argument('--max-retries', type=int, default=3, help='连接失败最大重试次数（默认: 3）')
+    parser.add_argument('--timeout', type=int, default=10, help='连接超时时间（秒，默认: 10）')
     
     args = parser.parse_args()
     
@@ -568,7 +685,7 @@ def main():
     
     if use_cache and not force_refresh:
         cache_path = get_cache_path(conn_params, args.tables)
-        result = load_cache(cache_path)
+        result = load_cache(cache_path, args.cache_max_age)
         
         if result:
             print("💾 使用缓存的表结构数据", file=sys.stderr)
@@ -580,7 +697,11 @@ def main():
             print("🔄 强制刷新模式，重新提取表结构...", file=sys.stderr)
         
         # 提取表结构
-        extractor = MySQLSchemaExtractor(**conn_params)
+        extractor = MySQLSchemaExtractor(
+            **conn_params,
+            max_retries=args.max_retries,
+            timeout=args.timeout
+        )
         extractor.connect()
         
         try:
@@ -607,13 +728,12 @@ def main():
         if args.output:
             output_path = args.output
         else:
-            # 默认输出到系统临时目录
-            output_dir = Path(tempfile.gettempdir()) / 'mysql_schema_reader' / 'outputs'
+            # 默认输出到项目根目录的 .aiout/mysql-schema-reader/outputs/
+            output_dir = Path.cwd() / '.aiout' / 'mysql-schema-reader' / 'outputs'
             output_dir.mkdir(parents=True, exist_ok=True)
             
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             ext = 'json' if args.format == 'json' else 'md'
-            filename = f"{conn_params['database']}_{timestamp}.{ext}"
+            filename = f"{conn_params['database']}.{ext}"
             output_path = str(output_dir / filename)
         
         with open(output_path, 'w', encoding='utf-8') as f:
@@ -623,8 +743,8 @@ def main():
         print(f"   {output_path}", file=sys.stderr)
         print(f"", file=sys.stderr)
         print(f"💡 提示:", file=sys.stderr)
-        print(f"   - 文件位于系统临时目录，会被自动清理", file=sys.stderr)
-        print(f"   - 如需长期保存，请使用: --output <目标路径>", file=sys.stderr)
+        print(f"   - 文件位于项目 .aiout 目录，便于集中管理", file=sys.stderr)
+        print(f"   - 如需保存到其他位置，请使用: --output <目标路径>", file=sys.stderr)
     
     except Exception as e:
         print(f"❌ 处理失败: {e}", file=sys.stderr)
@@ -635,6 +755,16 @@ def format_as_markdown(schema_data: Dict[str, Any]) -> str:
     """将表结构格式化为 Markdown"""
     lines = [f"# Database: {schema_data['database']}\n"]
     lines.append(f"**表数量**: {schema_data['tableCount']}\n")
+    
+    # 添加元数据信息
+    if 'metadata' in schema_data:
+        metadata = schema_data['metadata']
+        lines.append("元数据信息")
+        lines.append(f"- **提取时间**: {metadata.get('extractedAt', 'unknown')}")
+        lines.append(f"- **数据库版本**: {metadata.get('serverVersion', 'unknown')}")
+        lines.append(f"- **主机**: {metadata.get('host', 'unknown')}:{metadata.get('port', 3306)}")
+        lines.append(f"- **提取器版本**: {metadata.get('extractorVersion', 'unknown')}")
+        lines.append("")
     
     for table in schema_data['tables']:
         lines.append(f"## {table['tableName']}")
